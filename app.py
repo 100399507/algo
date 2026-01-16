@@ -3,126 +3,159 @@ import pandas as pd
 from allocation_algo import solve_model, run_auto_bid_aggressive
 from products_config import products, SELLER_GLOBAL_MOQ
 
-# Initialisation des acheteurs dans la session
-if "buyers" not in st.session_state:
+# Initialisation du state
+if 'buyers' not in st.session_state:
     st.session_state.buyers = []
-if "history" not in st.session_state:
+
+if 'history' not in st.session_state:
     st.session_state.history = []
 
-st.title("💰 Simulateur d'Enchères")
+# -----------------------------
+# Affichage informations produits
+# -----------------------------
+st.title("💰 Simulateur d'enchères")
+st.markdown("### Informations produits de départ")
+prod_info = pd.DataFrame([
+    {
+        "Produit": p["name"],
+        "Stock": p["stock"],
+        "MOQ": p["seller_moq"],
+        "Multiple": p["volume_multiple"],
+        "Prix départ": p["starting_price"]
+    } for p in products
+])
+st.table(prod_info)
 
-st.markdown(f"⚠️ **MOQ Global vendeur** = {SELLER_GLOBAL_MOQ} unités (tous produits confondus)")
+st.markdown("---")
 
 # -----------------------------
-# Cadre produit de départ
+# Ajouter ou modifier un acheteur
 # -----------------------------
-st.subheader("📦 Produits de départ")
+st.subheader("🧑 Ajouter / Modifier un acheteur")
+
+# Choix acheteur
+buyer_names = [b["name"] for b in st.session_state.buyers]
+selected_buyer = st.selectbox(
+    "Sélectionnez un acheteur à modifier ou laissez vide pour en ajouter un nouveau",
+    [""] + buyer_names
+)
+
+# Valeurs par défaut si nouvel acheteur
+new_buyer_defaults = {
+    "name": "",
+    "auto_bid": True,
+    "products": {p["id"]: {
+        "current_price": p["starting_price"] + 0.5,
+        "max_price": p["starting_price"] + 5.0,
+        "qty_desired": min(100, p["stock"] // 3),
+        "moq": min(30, p["stock"] // 5)
+    } for p in products}
+}
+
+# Si un acheteur existant est sélectionné
+if selected_buyer:
+    buyer_idx = buyer_names.index(selected_buyer)
+    buyer_data = st.session_state.buyers[buyer_idx]
+else:
+    buyer_data = new_buyer_defaults.copy()
+
+# Nom
+buyer_data["name"] = st.text_input("Nom de l'acheteur", value=buyer_data["name"])
+
+# Auto-bid
+buyer_data["auto_bid"] = st.checkbox("Auto-bid activé ?", value=buyer_data.get("auto_bid", True))
+
+# Produits
 for product in products:
-    with st.container():
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Produit", product["name"])
-        col2.metric("Stock", product["stock"])
-        col3.metric("Multiple", product["volume_multiple"])
-        col4.metric("Prix départ", f"{product['starting_price']:.2f}€")
+    prod_id = product["id"]
+    st.markdown(f"**{product['name']} ({prod_id})**")
+    col1, col2, col3 = st.columns(3)
+
+    # Prix actuel
+    buyer_data["products"][prod_id]["current_price"] = col1.number_input(
+        "Prix actuel",
+        min_value=product["starting_price"],
+        value=float(buyer_data["products"][prod_id]["current_price"]),
+        step=0.01,
+        key=f"cp_{buyer_data['name']}_{prod_id}"
+    )
+
+    # Prix max
+    buyer_data["products"][prod_id]["max_price"] = col2.number_input(
+        "Prix max",
+        min_value=buyer_data["products"][prod_id]["current_price"],
+        value=float(buyer_data["products"][prod_id]["max_price"]),
+        step=0.01,
+        key=f"mp_{buyer_data['name']}_{prod_id}"
+    )
+
+    # Quantité désirée (respect du multiple)
+    step_val = product["volume_multiple"]
+    buyer_data["products"][prod_id]["qty_desired"] = col3.number_input(
+        f"Quantité désirée (Multiple {step_val})",
+        min_value=buyer_data["products"][prod_id]["moq"],
+        value=int(buyer_data["products"][prod_id]["qty_desired"]),
+        step=step_val,
+        key=f"qty_{buyer_data['name']}_{prod_id}"
+    )
+
+    # MOQ (respect du multiple)
+    buyer_data["products"][prod_id]["moq"] = col3.number_input(
+        f"MOQ (Multiple {step_val})",
+        min_value=step_val,
+        value=int(buyer_data["products"][prod_id]["moq"]),
+        step=step_val,
+        key=f"moq_{buyer_data['name']}_{prod_id}"
+    )
+
+# Bouton pour sauvegarder / ajouter l’acheteur
+if st.button("✅ Sauvegarder / Ajouter cet acheteur"):
+    if selected_buyer:
+        # Mise à jour d’un acheteur existant
+        st.session_state.buyers[buyer_idx] = buyer_data
+    else:
+        # Nouvel acheteur
+        st.session_state.buyers.append(buyer_data)
+
+    # Recalcul allocations avec auto-bid agressif
+    st.session_state.buyers = run_auto_bid_aggressive(st.session_state.buyers, products)
+
+    # Sauvegarde de l’état dans l’historique
+    allocations, _ = solve_model(st.session_state.buyers, products)
+    st.session_state.history.append({b["name"]: allocations[b["name"]] for b in st.session_state.buyers})
+
+    st.success("✅ Allocation recalculée avec succès !")
 
 # -----------------------------
-# Ajouter un nouvel acheteur
+# Affichage allocations actuelles
 # -----------------------------
-st.subheader("Ajouter un nouvel acheteur")
-
-with st.form("new_buyer_form"):
-    buyer_name = st.text_input("Nom de l'acheteur", f"Acheteur_{len(st.session_state.buyers)+1}")
-    auto_bid = st.checkbox("Auto-bid activé ?", value=True)
-    
-    buyer_products = {}
-    for product in products:
-        vol_mult = product["volume_multiple"]
-        st.markdown(f"**{product['name']}** (Stock: {product['stock']}, Multiple: {vol_mult})")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            current_price = st.number_input(f"Prix offert {product['id']}", 
-                                            min_value=float(product['starting_price']),
-                                            value=float(product['starting_price'] + 0.5),
-                                            step=0.1)
-        with col2:
-            max_price = st.number_input(f"Prix max {product['id']}", 
-                                        value=float(current_price + 5.0), step=0.1)
-        with col3:
-            # Qté désirée respectant le multiple
-            default_qty = min(100, product['stock']//3)
-            # arrondi au multiple inférieur
-            default_qty = (default_qty // vol_mult) * vol_mult
-            qty_desired = st.number_input(
-                f"Quantité désirée {product['id']}", min_value=vol_mult, 
-                max_value=product['stock'], value=default_qty, step=vol_mult
-            )
-        
-        # MOQ respectant le multiple
-        default_moq = min(30, qty_desired//2)
-        default_moq = max(vol_mult, (default_moq // vol_mult) * vol_mult)
-        moq = st.number_input(
-            f"MOQ {product['id']}", min_value=vol_mult, max_value=qty_desired, 
-            value=default_moq, step=vol_mult
-        )
-        
-        buyer_products[product['id']] = {
-            "current_price": current_price,
-            "max_price": max_price,
-            "qty_desired": qty_desired,
-            "moq": moq
-        }
-    
-    submitted = st.form_submit_button("Ajouter l'acheteur")
-    
-    if submitted:
-        new_buyer = {
-            "name": buyer_name,
-            "auto_bid": auto_bid,
-            "products": buyer_products
-        }
-        st.session_state.buyers.append(new_buyer)
-        st.success(f"Acheteur {buyer_name} ajouté !")
-        
-        # Auto-bid agressif
-        st.session_state.buyers = run_auto_bid_aggressive(st.session_state.buyers, products)
-        
-        # Sauvegarder l'historique
-        allocations, _ = solve_model(st.session_state.buyers, products)
-        record = {b["name"]: allocations[b["name"]] for b in st.session_state.buyers}
-        st.session_state.history.append(record)
-
-# -----------------------------
-# Affichage compact de l'état actuel
-# -----------------------------
+st.subheader("📈 État actuel des allocations")
 if st.session_state.buyers:
-    st.subheader("État actuel des enchères")
-    
-    for product in products:
-        prod_id = product["id"]
-        st.markdown(f"**{product['name']}** (Stock: {product['stock']})")
-        
-        rows = []
-        for buyer in st.session_state.buyers:
-            alloc = solve_model(st.session_state.buyers, products)[0][buyer["name"]][prod_id]
-            rows.append({
-                "Acheteur": buyer["name"],
-                "Prix offert": buyer["products"][prod_id]["current_price"],
-                "Prix max": buyer["products"][prod_id]["max_price"],
-                "Qté désirée": buyer["products"][prod_id]["qty_desired"],
-                "MOQ": buyer["products"][prod_id]["moq"],
-                "Alloué": alloc
-            })
-        
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True)
-    
-    # Historique des allocations
-    st.subheader("📊 Historique des allocations")
-    for i, record in enumerate(st.session_state.history, 1):
-        st.markdown(f"**Itération {i}**")
-        hist_rows = []
-        for buyer_name, allocs in record.items():
-            row = {"Acheteur": buyer_name}
-            row.update(allocs)
-            hist_rows.append(row)
-        st.dataframe(pd.DataFrame(hist_rows), use_container_width=True)
+    allocations, _ = solve_model(st.session_state.buyers, products)
+    hist_rows = []
+    for buyer in st.session_state.buyers:
+        row = {"Acheteur": buyer["name"]}
+        for prod_id in allocations[buyer["name"]]:
+            row[f"{prod_id} (Alloué)"] = allocations[buyer["name"]][prod_id]
+            row[f"{prod_id} (Prix)"] = buyer["products"][prod_id]["current_price"]
+        hist_rows.append(row)
+    st.dataframe(pd.DataFrame(hist_rows), use_container_width=True)
+else:
+    st.info("Aucun acheteur pour l'instant")
+
+# -----------------------------
+# Historique complet
+# -----------------------------
+st.subheader("🕘 Historique des allocations")
+for i, record in enumerate(st.session_state.history, 1):
+    st.markdown(f"**Itération {i}**")
+    hist_rows = []
+    for buyer in st.session_state.buyers:
+        buyer_name = buyer["name"]
+        allocs = record[buyer_name]
+        row = {"Acheteur": buyer_name}
+        for prod_id in allocs:
+            row[f"{prod_id} (Alloué)"] = allocs[prod_id]
+            row[f"{prod_id} (Prix)"] = buyer["products"][prod_id]["current_price"]
+        hist_rows.append(row)
+    st.dataframe(pd.DataFrame(hist_rows), use_container_width=True)
