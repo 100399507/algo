@@ -1,13 +1,12 @@
+# app.py
 import streamlit as st
 import pandas as pd
+import copy
 from allocation_algo import solve_model
 from products_config import products, SELLER_GLOBAL_MOQ
-import copy
-
-st.set_page_config(page_title="Simulateur d'Enchères", layout="wide")
 
 # -----------------------------
-# Session state initialisation
+# Initialisation session_state
 # -----------------------------
 if "buyers" not in st.session_state:
     st.session_state.buyers = []
@@ -16,165 +15,156 @@ if "history" not in st.session_state:
     st.session_state.history = []
 
 # -----------------------------
-# Affichage informations produits
+# Cadre produits de départ
 # -----------------------------
-st.sidebar.header("🛒 Informations produits de départ")
+st.title("💻 Simulateur d'Enchères")
+st.subheader("📦 Informations produits")
+prod_data = []
 for p in products:
-    st.sidebar.markdown(
-        f"**{p['name']} ({p['id']})**\n"
-        f"Stock: {p['stock']} | MOQ vendeur: {p['seller_moq']} | Multiple: {p['volume_multiple']} | "
-        f"Prix départ: {p['starting_price']}€"
-    )
+    prod_data.append({
+        "Produit": p["name"],
+        "Stock initial": p["stock"],
+        "MOQ vendeur": p["seller_moq"],
+        "Multiple": p["volume_multiple"],
+        "Prix départ": p["starting_price"]
+    })
+st.table(pd.DataFrame(prod_data))
 
-st.title("💰 Simulateur d'Enchères Séquentiel")
+st.markdown("---")
 
 # -----------------------------
 # Ajouter un nouvel acheteur
 # -----------------------------
-st.subheader("➕ Ajouter un nouvel acheteur")
-with st.form("add_buyer_form"):
-    buyer_name = st.text_input("Nom de l'acheteur", value=f"Acheteur_{len(st.session_state.buyers)+1}")
+st.subheader("➕ Ajouter / Modifier un acheteur")
+with st.form("new_buyer_form"):
+    name = st.text_input("Nom de l'acheteur", f"Acheteur_{len(st.session_state.buyers)+1}")
     auto_bid = st.checkbox("Auto-bid activé ?", value=True)
-    new_buyer = {
-        "name": buyer_name,
-        "auto_bid": auto_bid,
-        "products": {}
-    }
 
-    for pid, p in enumerate(products):
-        st.markdown(f"**Produit {p['name']} ({p['id']})**")
+    buyer_inputs = {}
+    for p in products:
+        st.markdown(f"**{p['name']} ({p['id']})**")
         col1, col2, col3 = st.columns(3)
         with col1:
-            qty = st.number_input(
-                f"Quantité désirée ({p['id']})",
-                min_value=p['seller_moq'],
-                max_value=p['stock'],
-                step=p['volume_multiple'],
-                value=min(50, p['stock']//3),
-                key=f"qty_{len(st.session_state.buyers)}_{pid}"
+            qty_desired = st.number_input(
+                "Quantité souhaitée",
+                min_value=p["seller_moq"],
+                max_value=p["stock"],
+                value=min(50, p["stock"]),
+                step=p["volume_multiple"],
+                key=f"{name}_{p['id']}_qty"
             )
         with col2:
             moq = st.number_input(
-                f"MOQ ({p['id']})",
-                min_value=1,
-                max_value=qty,
-                step=p['volume_multiple'],
-                value=min(30, qty//2),
-                key=f"moq_{len(st.session_state.buyers)}_{pid}"
+                "MOQ",
+                min_value=p["seller_moq"],
+                max_value=qty_desired,
+                value=min(30, qty_desired),
+                step=p["volume_multiple"],
+                key=f"{name}_{p['id']}_moq"
             )
         with col3:
-            price = st.number_input(
-                f"Prix actuel ({p['id']})",
-                min_value=p['starting_price'],
-                value=p['starting_price'] + 0.5,
-                step=0.05,
-                key=f"price_{len(st.session_state.buyers)}_{pid}"
+            price_current = st.number_input(
+                "Prix offert",
+                min_value=p["starting_price"],
+                value=p["starting_price"] + 0.5,
+                step=0.1,
+                key=f"{name}_{p['id']}_price"
             )
-            max_price = st.number_input(
-                f"Prix max ({p['id']})",
-                min_value=price,
-                value=price + 5.0,
-                step=0.05,
-                key=f"max_{len(st.session_state.buyers)}_{pid}"
+            price_max = st.number_input(
+                "Prix max",
+                min_value=price_current,
+                value=price_current + 5.0,
+                step=0.1,
+                key=f"{name}_{p['id']}_max"
             )
 
-        new_buyer["products"][p["id"]] = {
-            "qty_desired": qty,
+        buyer_inputs[p["id"]] = {
+            "qty_desired": qty_desired,
             "moq": moq,
-            "current_price": price,
-            "max_price": max_price
+            "current_price": price_current,
+            "max_price": price_max
         }
 
-    submitted = st.form_submit_button("Ajouter l'acheteur")
-    if submitted:
-        st.session_state.buyers.append(new_buyer)
-        st.success(f"Acheteur {buyer_name} ajouté !")
+    submitted = st.form_submit_button("Ajouter / Mettre à jour")
 
-        # -----------------------------
-        # Calcul allocations
-        # -----------------------------
-        st.session_state.history.append(copy.deepcopy({
-            b["name"]: {pid: b["products"][pid]["current_price"] for pid in b["products"]}
-            for b in st.session_state.buyers
-        }))
+if submitted:
+    # Vérifie si l'acheteur existe déjà
+    exists = False
+    for i, b in enumerate(st.session_state.buyers):
+        if b["name"] == name:
+            st.session_state.buyers[i]["products"] = buyer_inputs
+            st.session_state.buyers[i]["auto_bid"] = auto_bid
+            exists = True
+            st.success(f"Acheteur {name} mis à jour !")
+            break
 
-# -----------------------------
-# Modifier le prix d'un acheteur existant
-# -----------------------------
-st.subheader("✏️ Modifier prix d'un acheteur")
-if st.session_state.buyers:
-    buyer_names = [b["name"] for b in st.session_state.buyers]
-    selected_buyer_idx = st.selectbox("Sélectionner un acheteur", range(len(buyer_names)), format_func=lambda x: buyer_names[x])
-    selected_buyer = st.session_state.buyers[selected_buyer_idx]
+    if not exists:
+        st.session_state.buyers.append({
+            "name": name,
+            "auto_bid": auto_bid,
+            "products": buyer_inputs
+        })
+        st.success(f"Acheteur {name} ajouté !")
 
-    with st.form("modify_price_form"):
-        for pid, prod in enumerate(products):
-            prod_id = prod["id"]
-            st.markdown(f"**Produit {prod['name']} ({prod_id})**")
-            col1, col2 = st.columns(2)
-            with col1:
-                new_price = st.number_input(
-                    f"Prix actuel ({prod_id})",
-                    min_value=prod['starting_price'],
-                    max_value=selected_buyer["products"][prod_id]["max_price"],
-                    value=selected_buyer["products"][prod_id]["current_price"],
-                    step=0.05,
-                    key=f"mod_price_{selected_buyer_idx}_{pid}"
-                )
-            with col2:
-                new_max_price = st.number_input(
-                    f"Prix max ({prod_id})",
-                    min_value=new_price,
-                    value=selected_buyer["products"][prod_id]["max_price"],
-                    step=0.05,
-                    key=f"mod_max_{selected_buyer_idx}_{pid}"
-                )
-            selected_buyer["products"][prod_id]["current_price"] = new_price
-            selected_buyer["products"][prod_id]["max_price"] = new_max_price
+    # Recalcul allocations
+    allocations, total_ca = solve_model(st.session_state.buyers, products)
 
-        submitted_mod = st.form_submit_button("Mettre à jour prix et recalculer")
-        if submitted_mod:
-            st.success("Prix mis à jour. Recalcul des allocations...")
-            # Sauvegarder l'état actuel pour l'historique
-            st.session_state.history.append(copy.deepcopy({
-                b["name"]: {pid: b["products"][pid]["current_price"] for pid in b["products"]}
-                for b in st.session_state.buyers
-            }))
+    # Enregistrer l'historique complet
+    hist_record = {}
+    for b in st.session_state.buyers:
+        buyer_data = {}
+        for pid, prod in b["products"].items():
+            buyer_data[pid] = {
+                "qty_desired": prod.get("qty_desired", 0),
+                "moq": prod.get("moq", 0),
+                "current_price": prod.get("current_price", 0),
+                "max_price": prod.get("max_price", 0),
+                "allocated": allocations[b["name"]][pid]
+            }
+        hist_record[b["name"]] = buyer_data
+    st.session_state.history.append(hist_record)
 
 # -----------------------------
-# Affichage allocations et historique
+# Afficher allocations actuelles
 # -----------------------------
 if st.session_state.buyers:
     st.subheader("📊 Allocations actuelles")
-    allocations, total_ca = solve_model(st.session_state.buyers, products)
-
-    alloc_rows = []
+    rows = []
     for b in st.session_state.buyers:
         row = {"Acheteur": b["name"]}
-        for pid, p in enumerate(products):
-            prod_id = p["id"]
-            row[f"{prod_id} (Alloué)"] = allocations[b["name"]][prod_id]
-            row[f"{prod_id} (Prix actuel)"] = b["products"][prod_id]["current_price"]
-            row[f"{prod_id} (Prix max)"] = b["products"][prod_id]["max_price"]
-            row[f"{prod_id} (Quantité souhaitée)"] = b["products"][prod_id]["qty_desired"]
-            row[f"{prod_id} (MOQ)"] = b["products"][prod_id]["moq"]
-        alloc_rows.append(row)
-    st.dataframe(pd.DataFrame(alloc_rows), use_container_width=True)
+        for p in products:
+            pid = p["id"]
+            prod_data = b["products"][pid]
+            row[f"{pid} (Quantité souhaitée)"] = prod_data["qty_desired"]
+            row[f"{pid} (MOQ)"] = prod_data["moq"]
+            row[f"{pid} (Prix offert)"] = prod_data["current_price"]
+            row[f"{pid} (Prix max)"] = prod_data["max_price"]
+            row[f"{pid} (Alloué)"] = allocations[b["name"]][pid]
+        rows.append(row)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
-    st.markdown(f"**CA total : {total_ca:.2f}€**")
+    st.markdown(f"**CA total:** {total_ca:.2f}€")
+    st.markdown(f"⚠️ MOQ global vendeur = {SELLER_GLOBAL_MOQ}")
 
 # -----------------------------
-# Historique
+# Historique complet
 # -----------------------------
 if st.session_state.history:
-    st.subheader("📜 Historique des prix")
+    st.subheader("📜 Historique des allocations")
     for i, record in enumerate(st.session_state.history, 1):
         st.markdown(f"**Itération {i}**")
         hist_rows = []
         for b in st.session_state.buyers:
-            row = {"Acheteur": b["name"]}
-            for pid, p in enumerate(products):
-                prod_id = p["id"]
-                row[f"{prod_id} (Prix utilisé)"] = record[b["name"]][prod_id]
+            buyer_name = b["name"]
+            row = {"Acheteur": buyer_name}
+            buyer_record = record.get(buyer_name, {})
+            for p in products:
+                pid = p["id"]
+                prod_record = buyer_record.get(pid, {})
+                row[f"{pid} (Quantité souhaitée)"] = prod_record.get("qty_desired", "")
+                row[f"{pid} (MOQ)"] = prod_record.get("moq", "")
+                row[f"{pid} (Prix offert)"] = prod_record.get("current_price", "")
+                row[f"{pid} (Prix max)"] = prod_record.get("max_price", "")
+                row[f"{pid} (Alloué)"] = prod_record.get("allocated", "")
             hist_rows.append(row)
         st.dataframe(pd.DataFrame(hist_rows), use_container_width=True)
