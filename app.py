@@ -36,7 +36,8 @@ with st.form("new_buyer_form"):
     
     buyer_products = {}
     for product in products:
-        st.markdown(f"**{product['name']}** (Stock: {product['stock']}, Multiple: {product['volume_multiple']})")
+        vol_mult = product["volume_multiple"]
+        st.markdown(f"**{product['name']}** (Stock: {product['stock']}, Multiple: {vol_mult})")
         col1, col2, col3 = st.columns(3)
         with col1:
             current_price = st.number_input(f"Prix offert {product['id']}", 
@@ -47,11 +48,22 @@ with st.form("new_buyer_form"):
             max_price = st.number_input(f"Prix max {product['id']}", 
                                         value=float(current_price + 5.0), step=0.1)
         with col3:
-            qty_desired = st.number_input(f"Quantité désirée {product['id']}", min_value=1, 
-                                          value=min(100, product['stock']//3), step=1)
+            # Qté désirée respectant le multiple
+            default_qty = min(100, product['stock']//3)
+            # arrondi au multiple inférieur
+            default_qty = (default_qty // vol_mult) * vol_mult
+            qty_desired = st.number_input(
+                f"Quantité désirée {product['id']}", min_value=vol_mult, 
+                max_value=product['stock'], value=default_qty, step=vol_mult
+            )
         
-        moq_default = min(30, qty_desired//2)
-        moq = st.number_input(f"MOQ {product['id']}", min_value=1, value=moq_default, step=1)
+        # MOQ respectant le multiple
+        default_moq = min(30, qty_desired//2)
+        default_moq = max(vol_mult, (default_moq // vol_mult) * vol_mult)
+        moq = st.number_input(
+            f"MOQ {product['id']}", min_value=vol_mult, max_value=qty_desired, 
+            value=default_moq, step=vol_mult
+        )
         
         buyer_products[product['id']] = {
             "current_price": current_price,
