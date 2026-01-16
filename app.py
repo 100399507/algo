@@ -13,7 +13,21 @@ st.title("💰 Simulateur d'Enchères")
 
 st.markdown(f"⚠️ **MOQ Global vendeur** = {SELLER_GLOBAL_MOQ} unités (tous produits confondus)")
 
+# -----------------------------
+# Cadre produit de départ
+# -----------------------------
+st.subheader("📦 Produits de départ")
+for product in products:
+    with st.container():
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Produit", product["name"])
+        col2.metric("Stock", product["stock"])
+        col3.metric("Multiple", product["volume_multiple"])
+        col4.metric("Prix départ", f"{product['starting_price']:.2f}€")
+
+# -----------------------------
 # Ajouter un nouvel acheteur
+# -----------------------------
 st.subheader("Ajouter un nouvel acheteur")
 
 with st.form("new_buyer_form"):
@@ -65,7 +79,9 @@ with st.form("new_buyer_form"):
         record = {b["name"]: allocations[b["name"]] for b in st.session_state.buyers}
         st.session_state.history.append(record)
 
+# -----------------------------
 # Affichage compact de l'état actuel
+# -----------------------------
 if st.session_state.buyers:
     st.subheader("État actuel des enchères")
     
@@ -98,4 +114,3 @@ if st.session_state.buyers:
             row.update(allocs)
             hist_rows.append(row)
         st.dataframe(pd.DataFrame(hist_rows), use_container_width=True)
-
