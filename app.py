@@ -36,9 +36,10 @@ def snapshot(label):
 
 def buyers_to_df():
     rows = []
+    last_allocations = st.session_state.history[-1]["allocations"] if st.session_state.history else {}
     for b in st.session_state.buyers:
         for pid, p in b["products"].items():
-            alloc_qty = next((h["allocations"][b["name"]][pid] for h in st.session_state.history[-1:] if h), 0)
+            alloc_qty = last_allocations.get(b["name"], {}).get(pid, 0)
             status = "Gagnant" if alloc_qty > 0 else "Perdant"
             rows.append({
                 "Acheteur": b["name"],
@@ -48,7 +49,8 @@ def buyers_to_df():
                 "Qté désirée": p["qty_desired"],
                 "MOQ produit": p["moq"],
                 "Auto-bid": b.get("auto_bid", False),
-                "Position": status
+                "Position": status,
+                "Quantité allouée": alloc_qty
             })
     return pd.DataFrame(rows)
 
@@ -184,3 +186,40 @@ with col3:
         st.session_state.buyers = []
         st.session_state.history = []
         st.session_state.sim_result = None
+
+# -----------------------------
+# History & Analysis
+# -----------------------------
+st.subheader("🕒 Historique des itérations")
+if st.session_state.history:
+    history_df = pd.DataFrame([
+        {
+            "Itération": i,
+            "Label": h["label"],
+            "Acheteurs": len(h["buyers"]),
+            "CA": h["total_ca"]
+        }
+        for i, h in enumerate(st.session_state.history)
+    ])
+    st.dataframe(history_df, use_container_width=True)
+
+    selected = st.selectbox("Voir détail itération", options=range(len(st.session_state.history)))
+    hist = st.session_state.history[selected]
+    
+    st.subheader("📊 Détail itération sélectionnée")
+    alloc_rows = []
+    for buyer_data in hist["buyers"]:
+        buyer_name = buyer_data["name"]
+        for pid, qty in hist["allocations"][buyer_name].items():
+            current_price = buyer_data["products"][pid]["current_price"]
+            alloc_rows.append({
+                "Acheteur": buyer_name,
+                "Produit": pid,
+                "Quantité allouée": qty,
+                "Prix courant": current_price,
+                "CA ligne": qty * current_price
+            })
+    st.dataframe(pd.DataFrame(alloc_rows), use_container_width=True)
+    st.metric("💰 Chiffre d'affaires total", f"{hist['total_ca']:.2f} €")
+else:
+    st.info("Aucune itération enregistrée")
