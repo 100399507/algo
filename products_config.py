@@ -1,8 +1,11 @@
 import streamlit as st
 import pandas as pd
 import copy
-from allocation_algo import solve_model, run_auto_bid_aggressive
+
+# CORRECTION : Import direct des variables du fichier de config
 from products_config import products, SELLER_GLOBAL_MOQ
+
+from allocation_algo import solve_model, run_auto_bid_aggressive
 
 st.set_page_config(page_title="Allocation Engine – Test UI", layout="wide")
 
@@ -63,7 +66,7 @@ with st.sidebar.form("add_buyer_form"):
             step=p["seller_moq"]
         )
 
-        # Prix minimum basé sur les prix actuels des autres acheteurs
+        # Prix minimum basé sur les autres acheteurs pour ce produit
         other_current_prices = [
             b["products"][p["id"]]["current_price"] 
             for b in st.session_state.buyers if p["id"] in b["products"]
@@ -80,7 +83,7 @@ with st.sidebar.form("add_buyer_form"):
         max_price = st.number_input(
             f"Prix max – {p['id']}",
             min_value=current_price,
-            value=current_price + 2.0,  # Valeur initiale, mais ne sera jamais modifiée par l'auto-bid
+            value=current_price + 2.0,
             step=0.01
         )
 
@@ -98,15 +101,18 @@ with st.sidebar.form("add_buyer_form"):
     # Simulation
     # -----------------------------
     if simulate and buyer_name:
-        # On simule uniquement les acheteurs existants avec auto-bid
-        existing_buyers = run_auto_bid_aggressive(
-            copy.deepcopy(st.session_state.buyers), products
-        )
-        temp_buyers = existing_buyers + [{
+        temp_buyers = copy.deepcopy(st.session_state.buyers)
+        temp_buyers.append({
             "name": buyer_name,
             "products": copy.deepcopy(buyer_products),
             "auto_bid": False
-        }]
+        })
+
+        # Auto-bid seulement sur les acheteurs existants
+        existing_buyers = run_auto_bid_aggressive(
+            copy.deepcopy(st.session_state.buyers), products
+        )
+        temp_buyers = existing_buyers + [temp_buyers[-1]]
 
         allocations, _ = solve_model(temp_buyers, products)
 
@@ -129,18 +135,16 @@ with st.sidebar.form("add_buyer_form"):
     # Ajouter l'acheteur
     # -----------------------------
     if add_buyer and buyer_name:
-        # Ajouter le nouvel acheteur avec sa saisie intacte
         st.session_state.buyers.append({
             "name": buyer_name,
             "products": copy.deepcopy(buyer_products),
             "auto_bid": auto_bid
         })
 
-        # Exécuter l'auto-bid agressif uniquement sur les acheteurs existants
-        new_buyer_obj = st.session_state.buyers[-1]
-        other_buyers = [b for b in st.session_state.buyers if b["name"] != buyer_name]
-        updated_buyers = run_auto_bid_aggressive(copy.deepcopy(other_buyers), products)
-        st.session_state.buyers = updated_buyers + [new_buyer_obj]
+        # 🔁 Auto-bid agressif uniquement sur les acheteurs existants
+        st.session_state.buyers = run_auto_bid_aggressive(
+            [b for b in st.session_state.buyers if b["name"] != buyer_name], products
+        ) + [st.session_state.buyers[-1]]
 
         snapshot(f"Ajout acheteur {buyer_name}")
         st.success("Acheteur ajouté avec succès")
@@ -227,7 +231,6 @@ if st.session_state.history:
     )
     hist = st.session_state.history[selected]
 
-    # Tableau détaillé avec current_price
     detail_rows = []
     for b in hist["buyers"]:
         buyer_name = b["name"]
