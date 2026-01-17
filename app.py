@@ -60,32 +60,40 @@ with st.sidebar.form("add_buyer"):
         st.markdown(f"**{p['name']} ({p['id']})**")
         qty = st.number_input(f"Qté désirée – {p['id']}", min_value=0, value=50, step=5)
         price = st.number_input(f"Prix courant – {p['id']}", min_value=0.0, value=p["starting_price"])
-        max_price = st.number_input(f"Prix max – {p['id']}", min_value=0.0, value=price + 2.0)
+        
+        # ⚠️ Ici on corrige le max_price pour ne jamais dépasser ce que l’utilisateur saisit
+        max_price_input = st.number_input(
+            f"Prix max – {p['id']}",
+            min_value=price,
+            value=price  # valeur initiale = prix courant
+        )
+        st.caption(f"Prix suggéré max: {price + 2}")  # juste un conseil visuel
 
         buyer_products[p["id"]] = {
             "qty_desired": qty,
             "current_price": price,
-            "max_price": max_price,
+            "max_price": max_price_input,
             "moq": p["seller_moq"]
         }
 
     submitted = st.form_submit_button("Ajouter acheteur")
-
+    
     if submitted and buyer_name:
         st.session_state.buyers.append({
             "name": buyer_name,
             "products": buyer_products,
             "auto_bid": auto_bid
         })
-
-        # Auto-bid agressif après ajout
+    
+        # 🔁 Auto-bid agressif immédiatement après ajout
         st.session_state.buyers = run_auto_bid_aggressive(
             st.session_state.buyers,
             products
         )
-
+    
         snapshot(f"Ajout acheteur + auto-bid {buyer_name}")
         st.success("Acheteur ajouté et auto-bid exécuté")
+
 
 # -----------------------------
 # Main – Data Overview
@@ -105,6 +113,7 @@ else:
 # Allocation Controls
 # -----------------------------
 st.subheader("⚙️ Actions")
+
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -128,13 +137,15 @@ with col3:
 # -----------------------------
 if st.session_state.history:
     last = st.session_state.history[-1]
-    st.subheader("📊 Allocation actuelle")
 
+    st.subheader("📊 Allocation actuelle")
     alloc_rows = []
+
     for buyer_data in last["buyers"]:
         buyer_name = buyer_data["name"]
         for pid, qty in last["allocations"][buyer_name].items():
             current_price = buyer_data["products"][pid]["current_price"]
+    
             alloc_rows.append({
                 "Acheteur": buyer_name,
                 "Produit": pid,
@@ -144,12 +155,14 @@ if st.session_state.history:
             })
 
     st.dataframe(pd.DataFrame(alloc_rows), use_container_width=True)
+
     st.metric("💰 Chiffre d'affaires total", f"{last['total_ca']:.2f} €")
 
 # -----------------------------
 # History & Analysis
 # -----------------------------
 st.subheader("🕒 Historique des itérations")
+
 if st.session_state.history:
     history_df = pd.DataFrame([
         {
@@ -160,9 +173,14 @@ if st.session_state.history:
         }
         for i, h in enumerate(st.session_state.history)
     ])
+
     st.dataframe(history_df, use_container_width=True)
 
-    selected = st.selectbox("Voir détail itération", options=range(len(st.session_state.history)))
+    selected = st.selectbox(
+        "Voir détail itération",
+        options=range(len(st.session_state.history))
+    )
+
     hist = st.session_state.history[selected]
     st.json(hist["allocations"])
 else:
