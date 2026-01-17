@@ -22,6 +22,9 @@ if "history" not in st.session_state:
 if "positioning" not in st.session_state:
     st.session_state.positioning = None
 
+if "new_buyer_to_add" not in st.session_state:
+    st.session_state.new_buyer_to_add = None
+
 
 # ======================================================
 # Helpers
@@ -72,6 +75,7 @@ with st.sidebar.form("add_buyer_form"):
     for p in products:
         st.markdown(f"### {p['name']} ({p['id']})")
 
+        # Prix minimal proposé basé sur marché
         market_price = get_market_max_price(p["id"])
         min_price = market_price + 0.01 if market_price is not None else p["starting_price"]
 
@@ -103,36 +107,42 @@ with st.sidebar.form("add_buyer_form"):
 
     submitted = st.form_submit_button("Ajouter l’acheteur")
 
-    if submitted and buyer_name:
-        new_buyer = {
-            "name": buyer_name,
-            "products": buyer_products,
-            "auto_bid": auto_bid
-        }
+# ======================================================
+# Traitement après submit (hors form)
+# ======================================================
+if submitted and buyer_name:
+    new_buyer = {
+        "name": buyer_name,
+        "products": buyer_products,
+        "auto_bid": auto_bid
+    }
 
-        # --- Simulation de positionnement ---
-        test_buyers = copy.deepcopy(st.session_state.buyers) + [new_buyer]
-        alloc, _ = solve_model(test_buyers, products)
+    # --- Simulation de positionnement ---
+    test_buyers = copy.deepcopy(st.session_state.buyers) + [new_buyer]
+    alloc, _ = solve_model(test_buyers, products)
 
-        won = any(
-            alloc.get(buyer_name, {}).get(pid, 0) > 0
-            for pid in buyer_products
-        )
+    won = any(
+        alloc.get(buyer_name, {}).get(pid, 0) > 0
+        for pid in buyer_products
+    )
 
-        st.session_state.positioning = "🟢 GAGNANT" if won else "🔴 PERDANT"
+    st.session_state.positioning = "🟢 GAGNANT" if won else "🔴 PERDANT"
 
-        # --- Ajout réel ---
-        st.session_state.buyers.append(new_buyer)
+    # --- Ajout réel ---
+    st.session_state.buyers.append(new_buyer)
 
-        # --- Auto-bid global ---
-        st.session_state.buyers = run_auto_bid_aggressive(
-            st.session_state.buyers, products
-        )
+    # --- Auto-bid global ---
+    st.session_state.buyers = run_auto_bid_aggressive(
+        st.session_state.buyers, products
+    )
 
-        snapshot(f"Ajout acheteur {buyer_name}")
+    snapshot(f"Ajout acheteur {buyer_name}")
 
-        st.success("Acheteur ajouté")
-        st.experimental_rerun()
+    st.success("Acheteur ajouté et auto-bid exécuté")
+
+    # --- Réinitialisation du formulaire et refresh complet ---
+    st.session_state.new_buyer_to_add = None
+    st.experimental_rerun()
 
 
 # ======================================================
