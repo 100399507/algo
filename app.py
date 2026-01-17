@@ -87,4 +87,122 @@ with st.sidebar.form("add_buyer"):
     # Simulation – n’impacte pas le vrai auto-bid
     # -----------------------------
     if sim_btn and buyer_name:
-        temp_buyers = copy.deepcopy(st.session_state.buyers
+        temp_buyers = copy.deepcopy(st.session_state.buyers)
+        temp_buyers.append({
+            "name": buyer_name,
+            "products": buyer_products,
+            "auto_bid": auto_bid
+        })
+        sim_alloc, sim_ca = solve_model(temp_buyers, products)
+
+        st.subheader("🧪 Simulation Allocation")
+        sim_rows = []
+        for b in temp_buyers:
+            bname = b["name"]
+            for pid, qty in sim_alloc[bname].items():
+                current_price = b["products"][pid]["current_price"]
+                sim_rows.append({
+                    "Acheteur": bname,
+                    "Produit": pid,
+                    "Quantité simulée": qty,
+                    "Prix courant": current_price,
+                    "CA ligne": qty * current_price
+                })
+        st.dataframe(pd.DataFrame(sim_rows), use_container_width=True)
+        st.metric("💰 Chiffre d'affaires simulé", f"{sim_ca:.2f} €")
+
+    # -----------------------------
+    # Ajouter acheteur et exécuter auto-bid réel
+    # -----------------------------
+    if submitted and buyer_name:
+        st.session_state.buyers.append({
+            "name": buyer_name,
+            "products": buyer_products,
+            "auto_bid": auto_bid
+        })
+        st.session_state.buyers = run_auto_bid_aggressive(
+            st.session_state.buyers,
+            products
+        )
+        snapshot(f"Ajout acheteur + auto-bid {buyer_name}")
+        st.success("Acheteur ajouté et auto-bid exécuté")
+
+# -----------------------------
+# Main – Data Overview
+# -----------------------------
+st.title("🧪 Interface de test – Allocation multi-acheteurs")
+
+st.subheader("📦 Produits")
+st.dataframe(pd.DataFrame(products), use_container_width=True)
+
+st.subheader("👥 Acheteurs")
+if st.session_state.buyers:
+    st.dataframe(buyers_to_df(), use_container_width=True)
+else:
+    st.info("Aucun acheteur pour le moment")
+
+# -----------------------------
+# Allocation Controls
+# -----------------------------
+st.subheader("⚙️ Actions")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("▶️ Lancer allocation"):
+        snapshot("Allocation manuelle")
+
+with col2:
+    if st.button("🤖 Auto-bid agressif"):
+        st.session_state.buyers = run_auto_bid_aggressive(
+            st.session_state.buyers, products
+        )
+        snapshot("Auto-bid")
+
+with col3:
+    if st.button("🧹 Reset"):
+        st.session_state.buyers = []
+        st.session_state.history = []
+
+# -----------------------------
+# Current Allocation
+# -----------------------------
+if st.session_state.history:
+    last = st.session_state.history[-1]
+    st.subheader("📊 Allocation actuelle")
+    alloc_rows = []
+
+    for buyer_data in last["buyers"]:
+        buyer_name = buyer_data["name"]
+        for pid, qty in last["allocations"][buyer_name].items():
+            current_price = buyer_data["products"][pid]["current_price"]
+            alloc_rows.append({
+                "Acheteur": buyer_name,
+                "Produit": pid,
+                "Quantité allouée": qty,
+                "Prix courant": current_price,
+                "CA ligne": qty * current_price
+            })
+    st.dataframe(pd.DataFrame(alloc_rows), use_container_width=True)
+    st.metric("💰 Chiffre d'affaires total", f"{last['total_ca']:.2f} €")
+
+# -----------------------------
+# History & Analysis
+# -----------------------------
+st.subheader("🕒 Historique des itérations")
+if st.session_state.history:
+    history_df = pd.DataFrame([
+        {
+            "Itération": i,
+            "Label": h["label"],
+            "Acheteurs": len(h["buyers"]),
+            "CA": h["total_ca"]
+        }
+        for i, h in enumerate(st.session_state.history)
+    ])
+    st.dataframe(history_df, use_container_width=True)
+
+    selected = st.selectbox("Voir détail itération", options=range(len(st.session_state.history)))
+    hist = st.session_state.history[selected]
+    st.json(hist["allocations"])
+else:
+    st.info("Aucune itération enregistrée")
