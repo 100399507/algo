@@ -27,7 +27,9 @@ def solve_model(
     z = {}
     n_mult = {}
 
-    # Variables
+    # -----------------------------
+    # Déclaration des variables
+    # -----------------------------
     for buyer in buyers:
         buyer_name = buyer["name"]
         z[buyer_name] = pulp.LpVariable(f"z_{buyer_name}", lowBound=0, upBound=1, cat="Binary")
@@ -38,7 +40,9 @@ def solve_model(
             y[(buyer_name, prod_id)] = pulp.LpVariable(f"y_{buyer_name}_{prod_id}", lowBound=0, upBound=1, cat="Binary")
             n_mult[(buyer_name, prod_id)] = pulp.LpVariable(f"n_{buyer_name}_{prod_id}", lowBound=0, cat="Integer")
 
-    # Objectif : maximiser CA
+    # -----------------------------
+    # Fonction objectif : maximiser CA
+    # -----------------------------
     revenue_terms = []
     for buyer in buyers:
         for prod_id in buyer["products"]:
@@ -47,7 +51,9 @@ def solve_model(
             revenue_terms.append(price * x[(buyer_name, prod_id)])
     model += pulp.lpSum(revenue_terms)
 
+    # -----------------------------
     # Contraintes par produit
+    # -----------------------------
     for product in products:
         prod_id = product["id"]
         volume_multiple = product["volume_multiple"]
@@ -57,7 +63,9 @@ def solve_model(
         for buyer in buyers:
             model += x[(buyer["name"], prod_id)] == volume_multiple * n_mult[(buyer["name"], prod_id)]
 
+    # -----------------------------
     # Contraintes par acheteur
+    # -----------------------------
     for buyer in buyers:
         buyer_name = buyer["name"]
         total_alloc_terms = [x[(buyer_name, prod_id)] for prod_id in buyer["products"]]
@@ -70,7 +78,9 @@ def solve_model(
             model += x[(buyer_name, prod_id)] <= prod_conf["qty_desired"] * y[(buyer_name, prod_id)]
             model += y[(buyer_name, prod_id)] <= z[buyer_name]
 
+    # -----------------------------
     # Résolution
+    # -----------------------------
     model.solve(pulp.PULP_CBC_CMD(msg=False))
 
     allocations = {}
@@ -99,17 +109,18 @@ def solve_model(
 
     return allocations, total_ca
 
-
 # -----------------------------
-# Auto-bid agressif
+# Auto-bid agressif corrigé
 # -----------------------------
 def run_auto_bid_aggressive(
     buyers: List[Dict],
     products: List[Dict],
-    increment: float = 0.05,
     max_rounds: int = 30
 ) -> List[Dict]:
-    """Augmente les prix pour atteindre allocations optimales sans dépasser max_price"""
+    """
+    Augmente les prix pour atteindre allocations optimales.
+    Ne dépasse jamais max_price.
+    """
     current_buyers = copy.deepcopy(buyers)
 
     for _ in range(max_rounds):
@@ -119,48 +130,43 @@ def run_auto_bid_aggressive(
         for buyer in current_buyers:
             if not buyer.get("auto_bid", False):
                 continue
-
             buyer_name = buyer["name"]
 
             for prod_id, prod_conf in buyer["products"].items():
-                current_alloc = allocations[buyer_name][prod_id]
                 qty_desired = prod_conf["qty_desired"]
                 current_price = prod_conf["current_price"]
                 max_price = prod_conf["max_price"]
+                current_alloc = allocations[buyer_name][prod_id]
 
+                # Si l'allocation est suffisante ou max atteint, skip
                 if current_alloc >= qty_desired or current_price >= max_price:
                     continue
 
                 best_price = current_price
 
-                # Test incréments
-                for test_increment in [2.0, 1.0, 0.5, 0.2, 0.1, 0.05]:
-                    test_price = min(current_price + test_increment, max_price)
+                # ⚡ Petits incréments d’abord
+                for inc in [0.05, 0.1, 0.2, 0.5, 1.0, 2.0]:
+                    test_price = min(current_price + inc, max_price)
                     if test_price <= current_price:
                         continue
 
-                    # On teste uniquement sur le buyer actuel
-                    test_buyers = copy.deepcopy(current_buyers)
-                    for b in test_buyers:
-                        if b["name"] == buyer_name:
-                            b["products"][prod_id]["current_price"] = test_price
+                    # Test sur la liste actuelle complète
+                    prod_conf["current_price"] = test_price
+                    new_allocs, _ = solve_model(current_buyers, products)
 
-                    test_alloc, _ = solve_model(test_buyers, products)
-
-                    if test_alloc[buyer_name][prod_id] > current_alloc:
+                    # Si allocation meilleure → on garde
+                    if new_allocs[buyer_name][prod_id] > current_alloc:
                         best_price = test_price
-                        if test_alloc[buyer_name][prod_id] >= qty_desired:
-                            break
+                        current_alloc = new_allocs[buyer_name][prod_id]
+                        changes_made = True
 
-                # ⚠️ On écrase seulement current_price, jamais max_price
+                # Mise à jour définitive du prix courant (jamais dépasser max_price)
                 prod_conf["current_price"] = min(best_price, max_price)
-                changes_made = True
 
         if not changes_made:
             break
 
     return current_buyers
-
 
 # -----------------------------
 # Recommandations pour prochain acheteur
@@ -170,6 +176,7 @@ def calculate_recommendations(
     products: List[Dict],
     new_buyer_name: str
 ) -> Dict:
+    """Calcule recommandations pour prochain acheteur"""
     if not buyers:
         return {
             product["id"]: {
@@ -183,6 +190,7 @@ def calculate_recommendations(
         }
 
     recommendations = {}
+
     for product in products:
         prod_id = product["id"]
         current_prices = [b["products"][prod_id]["current_price"] for b in buyers]
