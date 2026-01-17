@@ -53,7 +53,7 @@ st.sidebar.title("➕ Ajouter un acheteur")
 
 with st.sidebar.form("add_buyer"):
     buyer_name = st.text_input("Nom acheteur")
-    auto_bid = st.checkbox("Auto-bid activé",valeur=True)
+    auto_bid = st.checkbox("Auto-bid activé", value=True)
 
     buyer_products = {}
     for p in products:
