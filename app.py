@@ -58,13 +58,18 @@ with st.sidebar.form("add_buyer"):
     buyer_products = {}
     for p in products:
         st.markdown(f"**{p['name']} ({p['id']})**")
+        # ⚡ MOQ respecté
         qty = st.number_input(
             f"Qté désirée – {p['id']}",
-            min_value=p["seller_moq"],  # ⚡ La quantité minimale = MOQ produit
+            min_value=p["seller_moq"],
             value=p["seller_moq"],
             step=5
         )
-        price = st.number_input(f"Prix courant – {p['id']}", min_value=0.0, value=p["starting_price"])
+        price = st.number_input(
+            f"Prix courant – {p['id']}",
+            min_value=0.0,
+            value=p["starting_price"]
+        )
         max_price_input = st.number_input(
             f"Prix max – {p['id']}",
             min_value=price,
@@ -100,13 +105,14 @@ with st.sidebar.form("add_buyer"):
         for b in temp_buyers:
             bname = b["name"]
             for pid, qty in sim_alloc[bname].items():
-                current_price = b["products"][pid]["current_price"]
+                # ⚡ afficher le prix max saisi par l'acheteur
+                display_price = b["products"][pid]["max_price"]
                 sim_rows.append({
                     "Acheteur": bname,
                     "Produit": pid,
                     "Quantité simulée": qty,
-                    "Prix courant": current_price,
-                    "CA ligne": qty * current_price
+                    "Prix utilisé pour simulation": display_price,
+                    "CA ligne": qty * display_price
                 })
         st.dataframe(pd.DataFrame(sim_rows), use_container_width=True)
         st.metric("💰 Chiffre d'affaires simulé", f"{sim_ca:.2f} €")
