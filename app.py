@@ -2,11 +2,8 @@ import streamlit as st
 import pandas as pd
 import copy
 
-from allocation_algo import (
-    solve_model,
-    run_auto_bid_aggressive
-)
-from products_config import products, SELLER_GLOBAL_MOQ
+from allocation_algo import solve_model, run_auto_bid_aggressive
+from products_config import products
 
 # =========================================================
 # CONFIG
@@ -17,13 +14,16 @@ st.set_page_config(
 )
 
 # =========================================================
-# SESSION STATE
+# SESSION STATE INIT
 # =========================================================
 if "buyers" not in st.session_state:
     st.session_state.buyers = []
 
 if "history" not in st.session_state:
     st.session_state.history = []
+
+if "reset_form" not in st.session_state:
+    st.session_state.reset_form = False
 
 # =========================================================
 # HELPERS
@@ -56,7 +56,15 @@ def buyers_to_df():
 # =========================================================
 st.sidebar.title("➕ Ajouter un acheteur")
 
-with st.sidebar.form("add_buyer"):
+# Reset logic
+if st.session_state.reset_form:
+    st.session_state.clear()
+    st.session_state.buyers = []
+    st.session_state.history = []
+    st.session_state.reset_form = False
+
+with st.sidebar.form("add_buyer", clear_on_submit=True):
+
     buyer_name = st.text_input("Nom acheteur")
     auto_bid = st.checkbox("Auto-bid activé", value=True)
 
@@ -66,19 +74,24 @@ with st.sidebar.form("add_buyer"):
         st.markdown(f"### {p['name']} ({p['id']})")
 
         volume_multiple = p["volume_multiple"]
+        max_qty_allowed = p["total_qty"]
 
         # -----------------------------
-        # Quantité (multiple imposé)
+        # Quantité bloquée par stock
         # -----------------------------
         qty = st.number_input(
             f"Qté désirée – {p['id']}",
             min_value=0,
+            max_value=max_qty_allowed,
             step=volume_multiple,
-            value=volume_multiple * 5
+            value=volume_multiple
         )
 
+        if qty % volume_multiple != 0:
+            st.warning("⚠️ Quantité invalide (multiple requis)")
+
         # -----------------------------
-        # Prix courant > offres existantes
+        # Prix courant > existants
         # -----------------------------
         if st.session_state.buyers:
             existing_prices = [
@@ -97,14 +110,14 @@ with st.sidebar.form("add_buyer"):
         )
 
         # -----------------------------
-        # Prix max basé sur max existants
+        # Prix max (auto-bid sécurisé)
         # -----------------------------
         if st.session_state.buyers:
-            existing_max_prices = [
+            existing_max = [
                 b["products"][p["id"]]["max_price"]
                 for b in st.session_state.buyers
             ]
-            recommended_max = max(existing_max_prices) + 0.5
+            recommended_max = max(existing_max) + 0.5
         else:
             recommended_max = price
 
@@ -123,13 +136,7 @@ with st.sidebar.form("add_buyer"):
         }
 
         # -----------------------------
-        # Suggestions intelligentes
-        # -----------------------------
-        st.caption(f"💡 Prix conseillé pour gagner : ≥ {recommended_max:.2f} €")
-        st.caption(f"📦 Quantité recommandée : ≥ {p['seller_moq']}")
-
-        # -----------------------------
-        # Badge position gagnante / perdante
+        # Simulation position gagnante
         # -----------------------------
         if buyer_name:
             simulated_buyers = copy.deepcopy(st.session_state.buyers)
@@ -144,64 +151,38 @@ with st.sidebar.form("add_buyer"):
                 alloc_qty = allocs.get(buyer_name, {}).get(p["id"], 0)
 
                 if alloc_qty > 0:
-                    st.success("🟢 Position gagnante (stock alloué)")
+                    st.success("🟢 Position gagnante")
                 else:
-                    st.warning("🔴 Position perdante (pas de stock)")
+                    st.warning("🔴 Position perdante")
             except:
-                st.info("ℹ️ Simulation en attente")
+                st.info("ℹ️ En attente de simulation")
 
-    simulate = st.form_submit_button("🔍 Simuler allocation")
-    submitted = st.form_submit_button("Ajouter acheteur")
-
-# =========================================================
-# SIMULATION AVANT AJOUT
-# =========================================================
-if simulate and buyer_name:
-    simulated_buyers = copy.deepcopy(st.session_state.buyers)
-    simulated_buyers.append({
-        "name": buyer_name,
-        "products": buyer_products,
-        "auto_bid": auto_bid
-    })
-
-    allocs, ca = solve_model(simulated_buyers, products)
-
-    st.sidebar.subheader("📊 Simulation")
-    rows = []
-    for pid, qty in allocs.get(buyer_name, {}).items():
-        price = buyer_products[pid]["current_price"]
-        rows.append({
-            "Produit": pid,
-            "Quantité allouée": qty,
-            "Prix": price,
-            "CA": qty * price
-        })
-
-    st.sidebar.dataframe(pd.DataFrame(rows))
-    st.sidebar.metric("💰 CA estimé", f"{ca:.2f} €")
+    submit = st.form_submit_button("🛒 Acheter / Ajouter")
 
 # =========================================================
-# AJOUT ACHETEUR
+# ADD BUYER ACTION
 # =========================================================
-if submitted and buyer_name:
+if submit and buyer_name:
+
     st.session_state.buyers.append({
         "name": buyer_name,
         "products": buyer_products,
         "auto_bid": auto_bid
     })
 
+    # Auto-bid sans toucher à l'algo
     st.session_state.buyers = run_auto_bid_aggressive(
         st.session_state.buyers,
         products
     )
 
-    snapshot(f"Ajout acheteur + auto-bid {buyer_name}")
-    st.sidebar.success("Acheteur ajouté avec succès")
+    snapshot(f"Ajout acheteur {buyer_name}")
+    st.sidebar.success("Acheteur ajouté")
 
 # =========================================================
-# MAIN – DATA VIEW
+# MAIN UI
 # =========================================================
-st.title("🧪 Interface de test – Allocation multi-acheteurs")
+st.title("🧪 Allocation multi-acheteurs")
 
 st.subheader("📦 Produits")
 st.dataframe(pd.DataFrame(products), use_container_width=True)
@@ -213,7 +194,7 @@ else:
     st.info("Aucun acheteur")
 
 # =========================================================
-# ALLOCATION COURANTE
+# CURRENT ALLOCATION
 # =========================================================
 if st.session_state.history:
     last = st.session_state.history[-1]
@@ -236,7 +217,7 @@ if st.session_state.history:
     st.metric("💰 CA total", f"{last['total_ca']:.2f} €")
 
 # =========================================================
-# HISTORIQUE
+# HISTORY
 # =========================================================
 st.subheader("🕒 Historique")
 
