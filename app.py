@@ -53,7 +53,7 @@ st.sidebar.title("➕ Ajouter un acheteur")
 
 with st.sidebar.form("add_buyer"):
     buyer_name = st.text_input("Nom acheteur")
-    auto_bid = st.checkbox("Auto-bid activé")
+    auto_bid = st.checkbox("Auto-bid activé",valeur=True)
 
     buyer_products = {}
     for p in products:
@@ -69,14 +69,23 @@ with st.sidebar.form("add_buyer"):
         }
 
     submitted = st.form_submit_button("Ajouter acheteur")
+    
     if submitted and buyer_name:
         st.session_state.buyers.append({
             "name": buyer_name,
             "products": buyer_products,
             "auto_bid": auto_bid
         })
-        snapshot(f"Ajout acheteur {buyer_name}")
-        st.success("Acheteur ajouté")
+    
+        # 🔁 Auto-bid agressif immédiatement après ajout
+        st.session_state.buyers = run_auto_bid_aggressive(
+            st.session_state.buyers,
+            products
+        )
+    
+        snapshot(f"Ajout acheteur + auto-bid {buyer_name}")
+        st.success("Acheteur ajouté et auto-bid exécuté")
+
 
 # -----------------------------
 # Main – Data Overview
