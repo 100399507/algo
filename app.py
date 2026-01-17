@@ -123,13 +123,20 @@ if st.session_state.history:
 
     st.subheader("📊 Allocation actuelle")
     alloc_rows = []
-    for buyer, alloc in last["allocations"].items():
-        for pid, qty in alloc.items():
+
+    for buyer_data in last["buyers"]:
+        buyer_name = buyer_data["name"]
+        for pid, qty in last["allocations"][buyer_name].items():
+            current_price = buyer_data["products"][pid]["current_price"]
+    
             alloc_rows.append({
-                "Acheteur": buyer,
+                "Acheteur": buyer_name,
                 "Produit": pid,
-                "Quantité allouée": qty
+                "Quantité allouée": qty,
+                "Prix courant": current_price,
+                "CA ligne": qty * current_price
             })
+
 
     st.dataframe(pd.DataFrame(alloc_rows), use_container_width=True)
 
