@@ -2,10 +2,7 @@ import streamlit as st
 import pandas as pd
 import copy
 
-from allocation_algo import (
-    solve_model,
-    run_auto_bid_aggressive
-)
+from allocation_algo import solve_model, run_auto_bid_aggressive
 from products_config import products, SELLER_GLOBAL_MOQ
 
 st.set_page_config(page_title="Allocation Engine – Test UI", layout="wide")
@@ -22,9 +19,6 @@ if "history" not in st.session_state:
 if "positioning" not in st.session_state:
     st.session_state.positioning = None
 
-if "new_buyer_to_add" not in st.session_state:
-    st.session_state.new_buyer_to_add = None
-
 
 # ======================================================
 # Helpers
@@ -40,9 +34,7 @@ def snapshot(label):
 
 
 def get_market_max_price(prod_id):
-    prices = []
-    for b in st.session_state.buyers:
-        prices.append(b["products"][prod_id]["current_price"])
+    prices = [b["products"][prod_id]["current_price"] for b in st.session_state.buyers]
     return max(prices) if prices else None
 
 
@@ -56,7 +48,7 @@ def buyers_df():
                 "Prix courant": p["current_price"],
                 "Prix max": p["max_price"],
                 "Quantité souhaitée": p["qty_desired"],
-                "Auto-bid": b["auto_bid"]
+                "Auto-bid": p.get("auto_bid", b.get("auto_bid", False))
             })
     return pd.DataFrame(rows)
 
@@ -71,27 +63,37 @@ with st.sidebar.form("add_buyer_form"):
     auto_bid = st.checkbox("Auto-bid activé", value=True)
 
     buyer_products = {}
+    can_submit = True
 
     for p in products:
         st.markdown(f"### {p['name']} ({p['id']})")
 
-        # Prix minimal proposé basé sur marché
+        # Prix minimum basé sur marché
         market_price = get_market_max_price(p["id"])
         min_price = market_price + 0.01 if market_price is not None else p["starting_price"]
 
+        # Quantité initiale = multiple
         qty = st.number_input(
             "Quantité souhaitée",
-            min_value=0,
+            min_value=p["volume_multiple"],
             max_value=p["stock"],
-            step=p["volume_multiple"]
+            step=p["volume_multiple"],
+            value=p["volume_multiple"]
         )
 
+        # Vérifie si MOQ vendeur atteint
+        if qty < p["seller_moq"]:
+            st.warning(f"La quantité saisie pour {p['id']} doit être >= MOQ vendeur ({p['seller_moq']})")
+            can_submit = False
+
+        # Prix proposé >= marché
         current_price = st.number_input(
             "Prix proposé",
             min_value=min_price,
             value=min_price
         )
 
+        # Prix max fixe
         max_price = st.number_input(
             "Prix max (plafond fixe)",
             min_value=current_price,
@@ -105,7 +107,8 @@ with st.sidebar.form("add_buyer_form"):
             "moq": p["seller_moq"]
         }
 
-    submitted = st.form_submit_button("Ajouter l’acheteur")
+    submitted = st.form_submit_button("Ajouter l’acheteur", disabled=not can_submit)
+
 
 # ======================================================
 # Traitement après submit (hors form)
@@ -117,32 +120,19 @@ if submitted and buyer_name:
         "auto_bid": auto_bid
     }
 
-    # --- Simulation de positionnement ---
+    # --- Simulation de positionnement gagnant/perdant ---
     test_buyers = copy.deepcopy(st.session_state.buyers) + [new_buyer]
     alloc, _ = solve_model(test_buyers, products)
-
-    won = any(
-        alloc.get(buyer_name, {}).get(pid, 0) > 0
-        for pid in buyer_products
-    )
-
+    won = any(alloc.get(buyer_name, {}).get(pid, 0) > 0 for pid in buyer_products)
     st.session_state.positioning = "🟢 GAGNANT" if won else "🔴 PERDANT"
 
-    # --- Ajout réel ---
+    # --- Ajout réel et auto-bid ---
     st.session_state.buyers.append(new_buyer)
-
-    # --- Auto-bid global ---
-    st.session_state.buyers = run_auto_bid_aggressive(
-        st.session_state.buyers, products
-    )
+    st.session_state.buyers = run_auto_bid_aggressive(st.session_state.buyers, products)
 
     snapshot(f"Ajout acheteur {buyer_name}")
 
     st.success("Acheteur ajouté et auto-bid exécuté")
-
-    # --- Réinitialisation du formulaire et refresh complet ---
-    st.session_state.new_buyer_to_add = None
-    st.experimental_rerun()
 
 
 # ======================================================
@@ -162,6 +152,7 @@ if st.session_state.buyers:
 else:
     st.info("Aucun acheteur")
 
+
 # ======================================================
 # ACTIONS
 # ======================================================
@@ -175,9 +166,7 @@ with col1:
 
 with col2:
     if st.button("🤖 Auto-bid"):
-        st.session_state.buyers = run_auto_bid_aggressive(
-            st.session_state.buyers, products
-        )
+        st.session_state.buyers = run_auto_bid_aggressive(st.session_state.buyers, products)
         snapshot("Auto-bid manuel")
 
 with col3:
@@ -185,7 +174,8 @@ with col3:
         st.session_state.buyers = []
         st.session_state.history = []
         st.session_state.positioning = None
-        st.experimental_rerun()
+        st.success("Données réinitialisées")
+
 
 # ======================================================
 # CURRENT ALLOCATION
@@ -194,8 +184,8 @@ if st.session_state.history:
     last = st.session_state.history[-1]
 
     st.subheader("📊 Allocation actuelle")
-
     rows = []
+
     for b in last["buyers"]:
         for pid, qty in last["allocations"][b["name"]].items():
             price = b["products"][pid]["current_price"]
@@ -209,6 +199,7 @@ if st.session_state.history:
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
     st.metric("💰 CA total", f"{last['total_ca']:.2f} €")
+
 
 # ======================================================
 # HISTORY
