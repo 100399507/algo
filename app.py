@@ -1,8 +1,11 @@
 import streamlit as st
 import pandas as pd
 import copy
-from allocation_algo import solve_model, run_auto_bid_aggressive
+
+# CORRECTION : Import direct des variables du fichier de config
 from products_config import products, SELLER_GLOBAL_MOQ
+
+from allocation_algo import solve_model, run_auto_bid_aggressive
 
 st.set_page_config(page_title="Allocation Engine – Test UI", layout="wide")
 
@@ -102,7 +105,7 @@ with st.sidebar.form("add_buyer_form"):
         temp_buyers.append({
             "name": buyer_name,
             "products": copy.deepcopy(buyer_products),
-            "auto_bid": False  # Pas d'auto-bid sur le nouveau buyer
+            "auto_bid": False
         })
 
         # Auto-bid seulement sur les acheteurs existants
@@ -141,7 +144,7 @@ with st.sidebar.form("add_buyer_form"):
         # 🔁 Auto-bid agressif uniquement sur les acheteurs existants
         st.session_state.buyers = run_auto_bid_aggressive(
             [b for b in st.session_state.buyers if b["name"] != buyer_name], products
-        ) + [st.session_state.buyers[-1]]  # Nouveau buyer inchangé
+        ) + [st.session_state.buyers[-1]]
 
         snapshot(f"Ajout acheteur {buyer_name}")
         st.success("Acheteur ajouté avec succès")
@@ -228,7 +231,6 @@ if st.session_state.history:
     )
     hist = st.session_state.history[selected]
 
-    # Tableau détaillé avec current_price
     detail_rows = []
     for b in hist["buyers"]:
         buyer_name = b["name"]
