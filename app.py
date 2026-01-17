@@ -1,7 +1,11 @@
 import streamlit as st
 import pandas as pd
 import copy
-from allocation_algo import solve_model, run_auto_bid_aggressive, calculate_recommendations
+from allocation_algo import (
+    solve_model,
+    run_auto_bid_aggressive,
+    calculate_recommendations
+)
 from products_config import products, SELLER_GLOBAL_MOQ
 
 st.set_page_config(page_title="Allocation Engine – Test UI", layout="wide")
@@ -14,9 +18,6 @@ if "buyers" not in st.session_state:
 
 if "history" not in st.session_state:
     st.session_state.history = []
-
-if "simulated_allocation" not in st.session_state:
-    st.session_state.simulated_allocation = {}
 
 # -----------------------------
 # Helpers
@@ -53,63 +54,64 @@ st.sidebar.title("➕ Ajouter un acheteur")
 with st.sidebar.form("add_buyer"):
     buyer_name = st.text_input("Nom acheteur")
     auto_bid = st.checkbox("Auto-bid activé", value=True)
-    
+
     buyer_products = {}
     for p in products:
         st.markdown(f"**{p['name']} ({p['id']})**")
-        # Initialiser quantité à MOQ produit
+        # Quantité initialisée au MOQ produit, min = MOQ
         qty = st.number_input(
-            f"Qté désirée – {p['id']}", 
-            min_value=p["seller_moq"], 
-            value=p["seller_moq"], 
-            step=p["seller_moq"]
+            f"Qté désirée – {p['id']}",
+            min_value=p["seller_moq"],
+            value=p["seller_moq"],
+            step=p["volume_multiple"]
         )
-        # Prix courant = max actuel des autres acheteurs ou starting_price
-        other_current_prices = [
-            b["products"][p["id"]]["current_price"] 
-            for b in st.session_state.buyers
-        ] if st.session_state.buyers else []
-        init_price = max(other_current_prices) if other_current_prices else p["starting_price"]
-
+        # Prix courant initial
         current_price = st.number_input(
-            f"Prix proposé – {p['id']}", 
-            min_value=0.0, 
-            value=init_price, 
+            f"Prix proposé – {p['id']}",
+            min_value=0.0,
+            value=p["starting_price"],
             step=0.01
         )
-        # Prix max fixe saisi par l'utilisateur
+        # Prix max fixe choisi par l'acheteur
         max_price = st.number_input(
             f"Prix max – {p['id']}",
             min_value=current_price,
-            value=current_price,
+            value=current_price,  # commence égal au prix courant saisi
             step=0.01
         )
+
         buyer_products[p["id"]] = {
             "qty_desired": qty,
             "current_price": current_price,
-            "max_price": max_price,  # ✅ reste fixe
+            "max_price": max_price,
             "moq": p["seller_moq"]
         }
 
     submitted = st.form_submit_button("Ajouter acheteur")
-    reset = st.form_submit_button("Reset saisie")
-    
-    if reset:
-        st.experimental_rerun()
     
     if submitted and buyer_name:
-        # Ajouter buyer
         st.session_state.buyers.append({
             "name": buyer_name,
             "products": buyer_products,
             "auto_bid": auto_bid
         })
-        # 🔁 Auto-bid agressif après ajout
+    
+        # 🔁 Auto-bid agressif immédiatement après ajout
         st.session_state.buyers = run_auto_bid_aggressive(
-            st.session_state.buyers, products
+            st.session_state.buyers,
+            products
         )
+    
         snapshot(f"Ajout acheteur + auto-bid {buyer_name}")
         st.success("Acheteur ajouté et auto-bid exécuté")
+
+# -----------------------------
+# Sidebar – Reset
+# -----------------------------
+if st.sidebar.button("🧹 Reset tout"):
+    st.session_state.buyers = []
+    st.session_state.history = []
+    st.sidebar.success("Données réinitialisées")
 
 # -----------------------------
 # Main – Data Overview
@@ -130,24 +132,18 @@ else:
 # -----------------------------
 st.subheader("⚙️ Actions")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2 = st.columns(2)
 
 with col1:
     if st.button("▶️ Lancer allocation"):
         snapshot("Allocation manuelle")
+
 with col2:
     if st.button("🤖 Auto-bid agressif"):
         st.session_state.buyers = run_auto_bid_aggressive(
             st.session_state.buyers, products
         )
         snapshot("Auto-bid")
-with col3:
-    if st.button("🧹 Reset historique"):
-        st.session_state.buyers = []
-        st.session_state.history = []
-with col4:
-    if st.button("🔄 Reset saisie"):
-        st.experimental_rerun()
 
 # -----------------------------
 # Current Allocation
@@ -167,7 +163,8 @@ if st.session_state.history:
                 "Acheteur": buyer_name,
                 "Produit": pid,
                 "Quantité allouée": qty,
-                "Prix actuel": current_price,
+                "Prix courant": current_price,
+                "Prix max": buyer_data["products"][pid]["max_price"],
                 "CA ligne": qty * current_price
             })
 
@@ -175,11 +172,12 @@ if st.session_state.history:
     st.metric("💰 Chiffre d'affaires total", f"{last['total_ca']:.2f} €")
 
 # -----------------------------
-# History & Analysis
+# History & Analysis – Détail itération
 # -----------------------------
 st.subheader("🕒 Historique des itérations")
 
 if st.session_state.history:
+    # Vue synthétique des itérations
     history_df = pd.DataFrame([
         {
             "Itération": i,
@@ -191,6 +189,7 @@ if st.session_state.history:
     ])
     st.dataframe(history_df, use_container_width=True)
 
+    # Choix d'une itération à détailler
     selected = st.selectbox(
         "Voir détail itération",
         options=range(len(st.session_state.history)),
@@ -199,7 +198,7 @@ if st.session_state.history:
 
     hist = st.session_state.history[selected]
 
-    # Tableau détaillé avec prix actuel et max
+    # Construction DataFrame détaillé
     detail_rows = []
     for buyer_data in hist["buyers"]:
         buyer_name = buyer_data["name"]
@@ -215,7 +214,7 @@ if st.session_state.history:
                 "Produit": pid,
                 "Qté désirée": qty_desired,
                 "MOQ": moq,
-                "Quantité allouée": qty_alloc,
+                "Qté allouée": qty_alloc,
                 "Prix actuel": current_price,
                 "Prix max": max_price,
                 "Position": position,
@@ -224,7 +223,7 @@ if st.session_state.history:
 
     detail_df = pd.DataFrame(detail_rows)
 
-    # Coloration conditionnelle
+    # Coloration conditionnelle gagnant/perdant
     def highlight_position(row):
         if row["Position"] == "Gagnant":
             return ["background-color: #d4edda"] * len(row)
