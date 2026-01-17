@@ -59,11 +59,10 @@ with st.sidebar.form("add_buyer"):
     auto_bid = st.checkbox("Auto-bid activé", value=True)
 
     buyer_products = {}
-
     for p in products:
         st.markdown(f"**{p['name']} ({p['id']})**")
 
-        # Quantité initialisée au MOQ produit et minimum = MOQ
+        # Quantité initiale = MOQ produit, minimum = MOQ
         qty = st.number_input(
             f"Qté désirée – {p['id']}",
             min_value=p["seller_moq"],
@@ -72,17 +71,18 @@ with st.sidebar.form("add_buyer"):
             value=p["seller_moq"]
         )
 
-        # Prix initial = prix max actuel parmi les autres acheteurs ou starting_price
-        last_prices = [b["products"][p["id"]]["current_price"] for b in st.session_state.buyers] if st.session_state.buyers else []
-        min_price = max(last_prices) + 0.01 if last_prices else p["starting_price"]
+        # Prix initial = max des prix max existants parmi les autres acheteurs, sinon starting_price
+        other_max_prices = [b["products"][p["id"]]["max_price"] for b in st.session_state.buyers] if st.session_state.buyers else []
+        initial_price = max(other_max_prices) if other_max_prices else p["starting_price"]
 
         price = st.number_input(
             f"Prix proposé – {p['id']}",
-            min_value=min_price,
-            value=min_price,
+            min_value=initial_price,
+            value=initial_price,
             step=0.01
         )
 
+        # Prix max = valeur fixe, ne change jamais
         max_price = st.number_input(
             f"Prix max – {p['id']}",
             min_value=price,
@@ -100,19 +100,19 @@ with st.sidebar.form("add_buyer"):
     submitted = st.form_submit_button("Ajouter l’acheteur")
 
     if submitted and buyer_name:
-        # Ajouter l'acheteur et lancer auto-bid
         new_buyer = {
             "name": buyer_name,
             "products": buyer_products,
             "auto_bid": auto_bid
         }
 
-        # Simulation allocation pour savoir position gagnant/perdant
+        # Simulation position gagnant/perdant
         test_buyers = copy.deepcopy(st.session_state.buyers) + [new_buyer]
         alloc, _ = solve_model(test_buyers, products)
         won = any(alloc.get(buyer_name, {}).get(pid, 0) > 0 for pid in buyer_products)
         st.session_state.positioning = "🟢 GAGNANT" if won else "🔴 PERDANT"
 
+        # Ajouter et lancer auto-bid
         st.session_state.buyers.append(new_buyer)
         st.session_state.buyers = run_auto_bid_aggressive(st.session_state.buyers, products)
 
@@ -195,10 +195,7 @@ if st.session_state.history:
     ])
     st.dataframe(history_df, use_container_width=True)
 
-    selected = st.selectbox(
-        "Voir détail itération",
-        options=range(len(st.session_state.history))
-    )
+    selected = st.selectbox("Voir détail itération", options=range(len(st.session_state.history)))
     hist = st.session_state.history[selected]
     st.json(hist["allocations"])
 else:
